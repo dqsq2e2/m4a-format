@@ -60,7 +60,10 @@ jobs:
         with:
           script: |
             const version = '${{ needs.check-version.outputs.version }}';
-            const sha = '${{ steps.auto_commit.outputs.commit_hash }}';
+            let sha = '${{ steps.auto_commit.outputs.commit_hash }}';
+            if (!sha) {
+              sha = context.sha;
+            }
             github.rest.git.createRef({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -99,6 +102,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.check-version.outputs.version }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
