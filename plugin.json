@@ -1,0 +1,19 @@
+{
+    "id": "m4a-format",
+    "name": "M4A Format Support (FFmpeg)",
+    "version": "0.1.0",
+    "plugin_type": "format",
+    "type": "format",
+    "author": "Ting Reader Team",
+    "description": "Provides M4A metadata extraction and streaming via FFmpeg (system or bundled)",
+    "supported_extensions": ["m4a", "mp4"],
+    "entry_point": "m4a_format.dll",
+    "config_schema": {
+        "ffmpeg_path": {
+            "type": "string",
+            "title": "FFmpeg Path",
+            "description": "Path to ffmpeg executable (optional, auto-detects bundled or system PATH)",
+            "default": ""
+        }
+    }
+}
