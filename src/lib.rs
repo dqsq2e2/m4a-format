@@ -296,28 +296,46 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
 
     // Check for cover art in streams
     let mut has_cover = false;
+    let mut cover_codec = "jpg".to_string(); // Default to jpg
+
     if let Some(streams) = json_out.get("streams").and_then(|v| v.as_array()) {
         for stream in streams {
+            let mut is_this_cover = false;
+            
             if let Some(disposition) = stream.get("disposition") {
-                if let Some(attached_pic) = disposition.get("attached_pic").and_then(|v| v.as_i64()) {
-                    if attached_pic == 1 {
-                        has_cover = true;
-                        break;
+                if let Some(val) = disposition.get("attached_pic") {
+                    // Check number or string
+                    if val.as_i64() == Some(1) || val.as_u64() == Some(1) || val.as_str() == Some("1") {
+                        is_this_cover = true;
                     }
                 }
             }
-            // Some M4A files might mark cover as video stream without explicit disposition in some ffprobe versions
-            // But attached_pic is the standard way.
-            if let Some(codec_type) = stream.get("codec_type").and_then(|v| v.as_str()) {
-                if codec_type == "video" {
-                    if let Some(codec_name) = stream.get("codec_name").and_then(|v| v.as_str()) {
-                        if codec_name == "mjpeg" || codec_name == "png" {
-                            // High likelihood of being a cover if it's an audio file
-                            has_cover = true;
-                            // Don't break yet, prefer attached_pic confirmation if possible, but for now this is a good hint
-                        }
+            
+            // Fallback: Check if it's a video stream with mjpeg/png codec (heuristics)
+            if !is_this_cover {
+                 if let Some(codec_type) = stream.get("codec_type").and_then(|v| v.as_str()) {
+                     if codec_type == "video" {
+                         if let Some(codec_name) = stream.get("codec_name").and_then(|v| v.as_str()) {
+                             if codec_name == "mjpeg" || codec_name == "png" {
+                                 is_this_cover = true;
+                             }
+                         }
+                     }
+                 }
+            }
+
+            if is_this_cover {
+                has_cover = true;
+                if let Some(codec) = stream.get("codec_name").and_then(|v| v.as_str()) {
+                    if codec == "png" {
+                        cover_codec = "png".to_string();
+                    } else if codec == "mjpeg" || codec == "jpg" {
+                        cover_codec = "jpg".to_string();
+                    } else if codec == "webp" {
+                        cover_codec = "webp".to_string();
                     }
                 }
+                break;
             }
         }
     }
@@ -325,42 +343,49 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
     // Extract cover art if found
     if has_cover {
         if let Some(parent) = path.parent() {
-            let cover_path = parent.join("cover.jpg");
+            let cover_filename = format!("cover.{}", cover_codec);
+            let cover_path = parent.join(&cover_filename);
             
             // Only extract if not exists (to avoid overwriting user custom cover)
             if !cover_path.exists() {
-                // ffmpeg -i input.m4a -an -vcodec copy cover.jpg
-                // -an: disable audio
-                // -vcodec copy: copy video stream (image) directly
-                // -y: overwrite output (we checked exists, but race condition possible)
+                // Strategy: Try copy first (fastest, preserves quality), if fail, transcode.
+                // Note: -vcodec copy requires output container to match stream format.
+                // Since we dynamically set extension based on codec, copy should usually work.
+                
                 let status = Command::new(&ffmpeg)
                     .arg("-y")
                     .arg("-i")
                     .arg(path_str)
-                    .arg("-an")
-                    .arg("-vcodec")
+                    .arg("-map") // Only map the video stream (cover)
+                    .arg("0:v:0") // Select first video stream
+                    .arg("-c") // Alias for -vcodec
                     .arg("copy")
+                    .arg("-f") // Force format based on extension logic (raw image)
+                    .arg(if cover_codec == "jpg" { "mjpeg" } else { "image2" }) 
                     .arg(&cover_path)
                     .status();
                     
-                match status {
-                    Ok(s) if s.success() => {
-                        meta_obj.insert("cover_url".to_string(), json!(cover_path.to_string_lossy()));
-                    },
-                    Ok(_) => {
-                        // Try converting if copy fails (e.g. incompatible container)
-                        let _ = Command::new(&ffmpeg)
-                            .arg("-y")
-                            .arg("-i")
-                            .arg(path_str)
-                            .arg("-an")
-                            .arg(&cover_path)
-                            .status();
-                    },
-                    Err(_) => {}
+                let success = match status {
+                    Ok(s) => s.success(),
+                    Err(_) => false,
+                };
+
+                if !success {
+                    // Fallback: Transcode (remove -c copy)
+                    // ffmpeg -i input.m4a -map 0:v:0 -y cover.jpg
+                    let _ = Command::new(&ffmpeg)
+                        .arg("-y")
+                        .arg("-i")
+                        .arg(path_str)
+                        .arg("-map")
+                        .arg("0:v:0")
+                        .arg(&cover_path)
+                        .status();
                 }
-            } else {
-                // If it exists, return it as well so backend knows
+            }
+            
+            // If it exists (or we just created it), return it
+            if cover_path.exists() {
                 meta_obj.insert("cover_url".to_string(), json!(cover_path.to_string_lossy()));
             }
         }
