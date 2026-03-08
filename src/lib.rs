@@ -84,51 +84,42 @@ fn get_ffmpeg_path() -> String {
         return path.clone();
     }
     
-    // Check if ffmpeg exists in the plugin directory (bundled)
+    let mut search_paths = Vec::new();
+
+    // 1. Check relative to Executable (Production usually)
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(root) = current_exe.parent() {
-            // Check ./plugins/m4a-format/ffmpeg.exe
-            let mut path = root.join("plugins").join("m4a-format").join("ffmpeg");
-            if let Some(ext) = std::env::consts::EXE_EXTENSION.is_empty().then(|| "").or(Some(std::env::consts::EXE_EXTENSION)) {
-                 if !ext.is_empty() {
-                     path.set_extension(ext);
-                 }
-            }
-            if path.exists() {
-                return path.to_string_lossy().to_string();
-            }
-
-            // Check ./plugins/ffmpeg-utils/bin/ffmpeg.exe (Shared Plugin)
-            let mut path = root.join("plugins").join("ffmpeg-utils").join("bin").join("ffmpeg");
-            if let Some(ext) = std::env::consts::EXE_EXTENSION.is_empty().then(|| "").or(Some(std::env::consts::EXE_EXTENSION)) {
-                 if !ext.is_empty() {
-                     path.set_extension(ext);
-                 }
-            }
-            if path.exists() {
-                return path.to_string_lossy().to_string();
-            }
-            
-            // Check ./plugins/ffmpeg-utils/ffmpeg.exe (Shared Plugin root)
-            let mut path = root.join("plugins").join("ffmpeg-utils").join("ffmpeg");
-            if let Some(ext) = std::env::consts::EXE_EXTENSION.is_empty().then(|| "").or(Some(std::env::consts::EXE_EXTENSION)) {
-                 if !ext.is_empty() {
-                     path.set_extension(ext);
-                 }
-            }
-            if path.exists() {
-                return path.to_string_lossy().to_string();
-            }
+            search_paths.push(root.to_path_buf());
         }
     }
-    
-    // Check ./ffmpeg.exe (CWD)
-    let mut local_path = PathBuf::from("ffmpeg");
-    if let Some(ext) = std::env::consts::EXE_EXTENSION.is_empty().then(|| "").or(Some(std::env::consts::EXE_EXTENSION)) {
-         if !ext.is_empty() {
-             local_path.set_extension(ext);
-         }
+
+    // 2. Check relative to CWD (Development usually)
+    if let Ok(cwd) = std::env::current_dir() {
+        search_paths.push(cwd);
     }
+
+    let exe_ext = std::env::consts::EXE_EXTENSION;
+
+    for root in search_paths {
+        // Check ./plugins/m4a-format/ffmpeg.exe
+        let mut path = root.join("plugins").join("m4a-format").join("ffmpeg");
+        if !exe_ext.is_empty() { path.set_extension(exe_ext); }
+        if path.exists() { return path.to_string_lossy().to_string(); }
+
+        // Check ./plugins/ffmpeg-utils/bin/ffmpeg.exe
+        let mut path = root.join("plugins").join("ffmpeg-utils").join("bin").join("ffmpeg");
+        if !exe_ext.is_empty() { path.set_extension(exe_ext); }
+        if path.exists() { return path.to_string_lossy().to_string(); }
+        
+        // Check ./plugins/ffmpeg-utils/ffmpeg.exe
+        let mut path = root.join("plugins").join("ffmpeg-utils").join("ffmpeg");
+        if !exe_ext.is_empty() { path.set_extension(exe_ext); }
+        if path.exists() { return path.to_string_lossy().to_string(); }
+    }
+    
+    // Check ./ffmpeg.exe (CWD root)
+    let mut local_path = PathBuf::from("ffmpeg");
+    if !exe_ext.is_empty() { local_path.set_extension(exe_ext); }
     if local_path.exists() {
         return local_path.to_string_lossy().to_string();
     }
@@ -138,50 +129,42 @@ fn get_ffmpeg_path() -> String {
 }
 
 fn get_ffprobe_path() -> String {
-    // Check if ffprobe exists in the plugin directory (bundled)
+    let mut search_paths = Vec::new();
+
+    // 1. Check relative to Executable
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(root) = current_exe.parent() {
-            let mut path = root.join("plugins").join("m4a-format").join("ffprobe");
-            if let Some(ext) = std::env::consts::EXE_EXTENSION.is_empty().then(|| "").or(Some(std::env::consts::EXE_EXTENSION)) {
-                 if !ext.is_empty() {
-                     path.set_extension(ext);
-                 }
-            }
-            if path.exists() {
-                return path.to_string_lossy().to_string();
-            }
-
-            // Check ./plugins/ffmpeg-utils/bin/ffprobe.exe (Shared Plugin)
-            let mut path = root.join("plugins").join("ffmpeg-utils").join("bin").join("ffprobe");
-            if let Some(ext) = std::env::consts::EXE_EXTENSION.is_empty().then(|| "").or(Some(std::env::consts::EXE_EXTENSION)) {
-                 if !ext.is_empty() {
-                     path.set_extension(ext);
-                 }
-            }
-            if path.exists() {
-                return path.to_string_lossy().to_string();
-            }
-            
-            // Check ./plugins/ffmpeg-utils/ffprobe.exe (Shared Plugin root)
-            let mut path = root.join("plugins").join("ffmpeg-utils").join("ffprobe");
-            if let Some(ext) = std::env::consts::EXE_EXTENSION.is_empty().then(|| "").or(Some(std::env::consts::EXE_EXTENSION)) {
-                 if !ext.is_empty() {
-                     path.set_extension(ext);
-                 }
-            }
-            if path.exists() {
-                return path.to_string_lossy().to_string();
-            }
+            search_paths.push(root.to_path_buf());
         }
     }
-    
-    // Check ./ffprobe.exe (CWD)
-    let mut local_path = PathBuf::from("ffprobe");
-    if let Some(ext) = std::env::consts::EXE_EXTENSION.is_empty().then(|| "").or(Some(std::env::consts::EXE_EXTENSION)) {
-         if !ext.is_empty() {
-             local_path.set_extension(ext);
-         }
+
+    // 2. Check relative to CWD
+    if let Ok(cwd) = std::env::current_dir() {
+        search_paths.push(cwd);
     }
+
+    let exe_ext = std::env::consts::EXE_EXTENSION;
+
+    for root in search_paths {
+        // Check ./plugins/m4a-format/ffprobe.exe
+        let mut path = root.join("plugins").join("m4a-format").join("ffprobe");
+        if !exe_ext.is_empty() { path.set_extension(exe_ext); }
+        if path.exists() { return path.to_string_lossy().to_string(); }
+
+        // Check ./plugins/ffmpeg-utils/bin/ffprobe.exe
+        let mut path = root.join("plugins").join("ffmpeg-utils").join("bin").join("ffprobe");
+        if !exe_ext.is_empty() { path.set_extension(exe_ext); }
+        if path.exists() { return path.to_string_lossy().to_string(); }
+        
+        // Check ./plugins/ffmpeg-utils/ffprobe.exe
+        let mut path = root.join("plugins").join("ffmpeg-utils").join("ffprobe");
+        if !exe_ext.is_empty() { path.set_extension(exe_ext); }
+        if path.exists() { return path.to_string_lossy().to_string(); }
+    }
+    
+    // Check ./ffprobe.exe (CWD root)
+    let mut local_path = PathBuf::from("ffprobe");
+    if !exe_ext.is_empty() { local_path.set_extension(exe_ext); }
     if local_path.exists() {
         return local_path.to_string_lossy().to_string();
     }
