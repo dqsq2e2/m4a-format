@@ -286,10 +286,53 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                 "album_artist" | "album artist" | "aart" => { meta_obj.insert("album_artist".to_string(), json!(v_str)); },
                 "composer" | "wrt" => { meta_obj.insert("composer".to_string(), json!(v_str)); },
                 "date" | "year" | "day" => { meta_obj.insert("year".to_string(), json!(v_str)); },
-                "comment" | "cmt" => { meta_obj.insert("comment".to_string(), json!(v_str)); },
+                "comment" | "cmt" => { 
+                    // Clean description/comment (e.g. remove HTML tags if needed, or keep raw)
+                    // The user wants the full description including HTML tags.
+                    meta_obj.insert("comment".to_string(), json!(v_str)); 
+                    // Also map to description if not present
+                    if !meta_obj.contains_key("description") {
+                        meta_obj.insert("description".to_string(), json!(v_str));
+                    }
+                },
+                "lyrics" | "lyr" => {
+                    meta_obj.insert("lyrics".to_string(), json!(v_str));
+                    // Lyrics often contain the full description in podcasts/audiobooks
+                    if !meta_obj.contains_key("description") {
+                         meta_obj.insert("description".to_string(), json!(v_str));
+                    }
+                },
                 "genre" | "gen" => { meta_obj.insert("genre".to_string(), json!(v_str)); },
                 "description" | "desc" | "synopsis" => { meta_obj.insert("description".to_string(), json!(v_str)); },
                 _ => {} // Ignore others
+            }
+        }
+    }
+
+    // Fallback: If description is empty, try to populate it from comment or lyrics
+    let has_desc = meta_obj.get("description")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+        
+    if !has_desc {
+        if let Some(comment) = meta_obj.get("comment").and_then(|v| v.as_str()) {
+            if !comment.trim().is_empty() {
+                meta_obj.insert("description".to_string(), json!(comment));
+            }
+        }
+    }
+    
+    // Check again
+    let has_desc_2 = meta_obj.get("description")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+        
+    if !has_desc_2 {
+        if let Some(lyrics) = meta_obj.get("lyrics").and_then(|v| v.as_str()) {
+            if !lyrics.trim().is_empty() {
+                meta_obj.insert("description".to_string(), json!(lyrics));
             }
         }
     }
@@ -350,6 +393,8 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
             if !cover_path.exists() {
                 // Strategy 1: Copy with explicit format
                 let status = Command::new(&ffmpeg)
+                    .arg("-loglevel")
+                    .arg("error")
                     .arg("-y")
                     .arg("-i")
                     .arg(path_str)
@@ -370,6 +415,8 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                 if !success {
                     // Strategy 2: Transcode (remove -c copy)
                     let status2 = Command::new(&ffmpeg)
+                        .arg("-loglevel")
+                        .arg("error")
                         .arg("-y")
                         .arg("-i")
                         .arg(path_str)
@@ -380,12 +427,9 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                         
                     // If failed, log warning via println (backend captures stdout/stderr usually)
                     if let Err(e) = status2 {
-                        eprintln!("FFmpeg cover extraction failed: {}", e);
-                    } else if let Ok(s) = status2 {
-                         if !s.success() {
-                             eprintln!("FFmpeg exited with error code during cover extraction");
-                         }
+                        eprintln!("FFmpeg cover extraction strategy 2 failed: {}", e);
                     }
+                    // Don't check status2 success here, check file existence later
                 }
             }
             
@@ -398,6 +442,8 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                  let cover_path_jpg = parent.join("cover.jpg");
                  if !cover_path_jpg.exists() {
                      let _ = Command::new(&ffmpeg)
+                        .arg("-loglevel")
+                        .arg("error")
                         .arg("-y")
                         .arg("-i")
                         .arg(path_str)
@@ -409,6 +455,8 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                  }
                  if cover_path_jpg.exists() {
                      meta_obj.insert("cover_url".to_string(), json!(cover_path_jpg.to_string_lossy()));
+                 } else {
+                     eprintln!("Failed to extract cover for {}", path_str);
                  }
             }
         }
