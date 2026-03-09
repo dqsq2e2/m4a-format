@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use serde_json::{json, Value};
 use std::sync::Mutex;
+use regex::Regex;
 
 // Global state to manage FFmpeg path or other resources
 // Since this is a dylib, we can use static mutable state with synchronization
@@ -337,6 +338,60 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
         if let Some(lyrics) = meta_obj.get("lyrics").and_then(|v| v.as_str()) {
             if !lyrics.trim().is_empty() {
                 meta_obj.insert("description".to_string(), json!(lyrics));
+            }
+        }
+    }
+
+    // Description cleaning and author/narrator extraction from description text
+    if let Some(desc_val) = meta_obj.get("description").and_then(|v| v.as_str()) {
+        let raw = desc_val.to_string();
+        if !raw.trim().is_empty() {
+            let mut t = raw.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n");
+            let re_p_open = Regex::new("(?is)<p[^>]*>").unwrap();
+            t = re_p_open.replace_all(&t, "\n").to_string();
+            let re_p_close = Regex::new("(?is)</p>").unwrap();
+            t = re_p_close.replace_all(&t, "\n").to_string();
+            let re_tags = Regex::new("(?is)<[^>]+>").unwrap();
+            t = re_tags.replace_all(&t, "").to_string();
+            t = t.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+            let re_ws = Regex::new(r"[ \t\u{00A0}]+").unwrap();
+            t = re_ws.replace_all(&t, " ").to_string();
+            let re_blank = Regex::new(r"\n{2,}").unwrap();
+            t = re_blank.replace_all(&t, "\n").to_string();
+            let t = t.trim().to_string();
+            if !t.is_empty() {
+                meta_obj.insert("description".to_string(), json!(t.clone()));
+                let author_re = Regex::new(r"(?m)(作者|原著|作家)\s*[：:]\s*([^\n，,。；;]+)").unwrap();
+                let narrator_re = Regex::new(r"(?m)(主播|演播|播讲|朗读)\s*[：:]\s*([^\n，,。；;]+)").unwrap();
+                let author_from_desc = author_re.captures(&t).and_then(|c| c.get(2)).map(|m| m.as_str().trim().to_string());
+                let narrator_from_desc = narrator_re.captures(&t).and_then(|c| c.get(2)).map(|m| m.as_str().trim().to_string());
+                
+                // Get original artist value
+                let artist_val = meta_obj.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+                if let Some(a) = author_from_desc.clone() {
+                    if !a.is_empty() {
+                        meta_obj.insert("album_artist".to_string(), json!(a.clone()));
+                        // Rule: If artist matches extracted author, then artist is Author.
+                        // We map album_artist to Author.
+                        // And we ensure artist stays as Author.
+                        if !artist_val.is_empty() && artist_val == a {
+                             meta_obj.insert("artist".to_string(), json!(a));
+                        }
+                    }
+                }
+                
+                if let Some(n) = narrator_from_desc.clone() {
+                    if !n.is_empty() {
+                        meta_obj.insert("narrator".to_string(), json!(n.clone()));
+                        
+                        // Rule: If artist is empty OR matches extracted narrator, then artist is Narrator.
+                        // And default artist to narrator if ambiguous.
+                        if artist_val.trim().is_empty() || artist_val.trim() == n {
+                            meta_obj.insert("artist".to_string(), json!(n));
+                        }
+                    }
+                }
             }
         }
     }
