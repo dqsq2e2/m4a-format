@@ -108,7 +108,9 @@ fn get_ffmpeg_path() -> String {
     
     // Check ./ffmpeg.exe (CWD root fallback)
     let mut local_path = PathBuf::from("ffmpeg");
-    if !exe_ext.is_empty() { local_path.set_extension(exe_ext); }
+    if !std::env::consts::EXE_EXTENSION.is_empty() { 
+        local_path.set_extension(std::env::consts::EXE_EXTENSION); 
+    }
     if local_path.exists() {
         return local_path.to_string_lossy().to_string();
     }
@@ -132,7 +134,9 @@ fn get_ffprobe_path() -> String {
     
     // Check ./ffprobe.exe (CWD root)
     let mut local_path = PathBuf::from("ffprobe");
-    if !exe_ext.is_empty() { local_path.set_extension(exe_ext); }
+    if !std::env::consts::EXE_EXTENSION.is_empty() { 
+        local_path.set_extension(std::env::consts::EXE_EXTENSION); 
+    }
     if local_path.exists() {
         return local_path.to_string_lossy().to_string();
     }
