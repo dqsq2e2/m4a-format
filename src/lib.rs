@@ -86,8 +86,6 @@ fn get_ffmpeg_path() -> String {
         return path.clone();
     }
     
-    let mut search_paths = Vec::new();
-
     // 1. Check relative to Executable (Production usually)
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(root) = current_exe.parent() {
