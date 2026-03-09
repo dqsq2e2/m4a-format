@@ -348,19 +348,16 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
             
             // Only extract if not exists (to avoid overwriting user custom cover)
             if !cover_path.exists() {
-                // Strategy: Try copy first (fastest, preserves quality), if fail, transcode.
-                // Note: -vcodec copy requires output container to match stream format.
-                // Since we dynamically set extension based on codec, copy should usually work.
-                
+                // Strategy 1: Copy with explicit format
                 let status = Command::new(&ffmpeg)
                     .arg("-y")
                     .arg("-i")
                     .arg(path_str)
-                    .arg("-map") // Only map the video stream (cover)
-                    .arg("0:v:0") // Select first video stream
-                    .arg("-c") // Alias for -vcodec
+                    .arg("-map")
+                    .arg("0:v:0")
+                    .arg("-c")
                     .arg("copy")
-                    .arg("-f") // Force format based on extension logic (raw image)
+                    .arg("-f")
                     .arg(if cover_codec == "jpg" { "mjpeg" } else { "image2" }) 
                     .arg(&cover_path)
                     .status();
@@ -371,9 +368,8 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                 };
 
                 if !success {
-                    // Fallback: Transcode (remove -c copy)
-                    // ffmpeg -i input.m4a -map 0:v:0 -y cover.jpg
-                    let _ = Command::new(&ffmpeg)
+                    // Strategy 2: Transcode (remove -c copy)
+                    let status2 = Command::new(&ffmpeg)
                         .arg("-y")
                         .arg("-i")
                         .arg(path_str)
@@ -381,12 +377,39 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                         .arg("0:v:0")
                         .arg(&cover_path)
                         .status();
+                        
+                    // If failed, log warning via println (backend captures stdout/stderr usually)
+                    if let Err(e) = status2 {
+                        eprintln!("FFmpeg cover extraction failed: {}", e);
+                    } else if let Ok(s) = status2 {
+                         if !s.success() {
+                             eprintln!("FFmpeg exited with error code during cover extraction");
+                         }
+                    }
                 }
             }
             
             // If it exists (or we just created it), return it
             if cover_path.exists() {
                 meta_obj.insert("cover_url".to_string(), json!(cover_path.to_string_lossy()));
+            } else {
+                 // Try one last desperate attempt: force mjpeg to cover.jpg
+                 // Sometimes codec detection is wrong
+                 let cover_path_jpg = parent.join("cover.jpg");
+                 if !cover_path_jpg.exists() {
+                     let _ = Command::new(&ffmpeg)
+                        .arg("-y")
+                        .arg("-i")
+                        .arg(path_str)
+                        .arg("-an")
+                        .arg("-f")
+                        .arg("mjpeg")
+                        .arg(&cover_path_jpg)
+                        .status();
+                 }
+                 if cover_path_jpg.exists() {
+                     meta_obj.insert("cover_url".to_string(), json!(cover_path_jpg.to_string_lossy()));
+                 }
             }
         }
     }
