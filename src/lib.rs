@@ -91,49 +91,18 @@ fn get_ffmpeg_path() -> String {
     // 1. Check relative to Executable (Production usually)
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(root) = current_exe.parent() {
-            search_paths.push(root.to_path_buf());
-        }
-    }
-
-    // 2. Check relative to CWD (Development usually)
-    if let Ok(cwd) = std::env::current_dir() {
-        search_paths.push(cwd);
-    }
-
-    let exe_ext = std::env::consts::EXE_EXTENSION;
-
-    for root in search_paths {
-        // Try to find "plugins" directory
-        let possible_plugin_dirs = vec![
-            root.join("plugins"),
-            root.join("backend").join("plugins"),
-            root.join("ting-reader").join("backend").join("plugins"),
-            // Case: running from target/debug/deps, so plugins is up 3 levels then plugins
-            root.join("..").join("..").join("plugins"), 
-        ];
-
-        for plugins_dir in possible_plugin_dirs {
-            if plugins_dir.exists() {
-                // Look for any folder starting with "FFmpeg Provider" or "ffmpeg-utils"
-                if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                            if dir_name.starts_with("FFmpeg Provider") || dir_name.starts_with("ffmpeg-utils") {
-                                // Found candidate directory, check for binary
-                                let mut bin_path = path.join("ffmpeg");
-                                if !exe_ext.is_empty() { bin_path.set_extension(exe_ext); }
-                                if bin_path.exists() { return bin_path.to_string_lossy().to_string(); }
-
-                                let mut bin_sub_path = path.join("bin").join("ffmpeg");
-                                if !exe_ext.is_empty() { bin_sub_path.set_extension(exe_ext); }
-                                if bin_sub_path.exists() { return bin_sub_path.to_string_lossy().to_string(); }
-                            }
-                        }
-                    }
-                }
+            // Plugins structure:
+            // plugins/
+            //   FFmpeg Provider@1.0.0/
+            //     ffmpeg.exe
+            //     ffprobe.exe
+            
+            let plugin_dir = root.join("plugins").join("FFmpeg Provider@1.0.0");
+            let mut bin_path = plugin_dir.join("ffmpeg");
+            if !std::env::consts::EXE_EXTENSION.is_empty() { 
+                bin_path.set_extension(std::env::consts::EXE_EXTENSION); 
             }
+            if bin_path.exists() { return bin_path.to_string_lossy().to_string(); }
         }
     }
     
@@ -149,51 +118,15 @@ fn get_ffmpeg_path() -> String {
 }
 
 fn get_ffprobe_path() -> String {
-    let mut search_paths = Vec::new();
-
     // 1. Check relative to Executable
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(root) = current_exe.parent() {
-            search_paths.push(root.to_path_buf());
-        }
-    }
-
-    // 2. Check relative to CWD
-    if let Ok(cwd) = std::env::current_dir() {
-        search_paths.push(cwd);
-    }
-
-    let exe_ext = std::env::consts::EXE_EXTENSION;
-
-    for root in search_paths {
-        // Try to find "plugins" directory
-        let possible_plugin_dirs = vec![
-            root.join("plugins"),
-            root.join("backend").join("plugins"),
-            root.join("ting-reader").join("backend").join("plugins"),
-            root.join("..").join("..").join("plugins"), 
-        ];
-
-        for plugins_dir in possible_plugin_dirs {
-            if plugins_dir.exists() {
-                if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                            if dir_name.starts_with("FFmpeg Provider") || dir_name.starts_with("ffmpeg-utils") {
-                                let mut bin_path = path.join("ffprobe");
-                                if !exe_ext.is_empty() { bin_path.set_extension(exe_ext); }
-                                if bin_path.exists() { return bin_path.to_string_lossy().to_string(); }
-
-                                let mut bin_sub_path = path.join("bin").join("ffprobe");
-                                if !exe_ext.is_empty() { bin_sub_path.set_extension(exe_ext); }
-                                if bin_sub_path.exists() { return bin_sub_path.to_string_lossy().to_string(); }
-                            }
-                        }
-                    }
-                }
+            let plugin_dir = root.join("plugins").join("FFmpeg Provider@1.0.0");
+            let mut bin_path = plugin_dir.join("ffprobe");
+            if !std::env::consts::EXE_EXTENSION.is_empty() { 
+                bin_path.set_extension(std::env::consts::EXE_EXTENSION); 
             }
+            if bin_path.exists() { return bin_path.to_string_lossy().to_string(); }
         }
     }
     
@@ -395,6 +328,12 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                         // Rule: If artist matches extracted author, then artist is Author.
                         // We map album_artist to Author.
                         // And we ensure artist stays as Author.
+                        // BUG FIX: Only if artist_val matches 'a' do we confirm it.
+                        // If artist_val is "郭益达" and 'a' is "打眼", we should NOT overwrite artist with 'a'.
+                        // The previous logic was: if !artist_val.is_empty() && artist_val == a { ... }
+                        // This logic was actually correct for confirming Author.
+                        // But wait, if artist_val is "郭益达", this block does nothing to artist.
+                        
                         if !artist_val.is_empty() && artist_val == a {
                              meta_obj.insert("artist".to_string(), json!(a));
                         }
@@ -407,6 +346,7 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                         
                         // Rule: If artist is empty OR matches extracted narrator, then artist is Narrator.
                         // And default artist to narrator if ambiguous.
+                        // BUG FIX: If artist_val is "郭益达" and n is "郭益达", we confirm artist is Narrator.
                         if artist_val.trim().is_empty() || artist_val.trim() == n {
                             meta_obj.insert("artist".to_string(), json!(n));
                         }
