@@ -361,10 +361,30 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
             let t = t.trim().to_string();
             if !t.is_empty() {
                 meta_obj.insert("description".to_string(), json!(t.clone()));
-                let author_re = Regex::new(r"(?m)(作者|原著|作家)\s*[：:]\s*([^\n，,。；;]+)").unwrap();
-                let narrator_re = Regex::new(r"(?m)(主播|演播|播讲|朗读)\s*[：:]\s*([^\n，,。；;]+)").unwrap();
-                let author_from_desc = author_re.captures(&t).and_then(|c| c.get(2)).map(|m| m.as_str().trim().to_string());
-                let narrator_from_desc = narrator_re.captures(&t).and_then(|c| c.get(2)).map(|m| m.as_str().trim().to_string());
+                
+                // Enhanced regex to be more robust
+                // Use case-insensitive matching (i) and multi-line mode (m)
+                // Match "Label: Name" pattern.
+                // Stop at newline, comma, period, or common delimiters if text continues on same line.
+                // But usually "Author: Name" is followed by newline or comma.
+                // Let's capture until newline first, then clean.
+                let author_re = Regex::new(r"(?im)(?:作者|原著|作家)\s*[：:]\s*([^\n]+)").unwrap();
+                let narrator_re = Regex::new(r"(?im)(?:主播|演播|播讲|朗读)\s*[：:]\s*([^\n]+)").unwrap();
+                
+                // Clean the extracted value (remove trailing punctuation if any)
+                let clean_extracted = |val: &str| -> String {
+                     let mut s = val.trim().to_string();
+                     // If contains comma/period, take first part?
+                     // Example: "打眼，阅文集团白金作家" -> "打眼"
+                     // Split by common separators
+                     if let Some(idx) = s.find(|c| c == '，' || c == ',' || c == '。' || c == '；' || c == ';') {
+                         s = s[..idx].trim().to_string();
+                     }
+                     s
+                };
+
+                let author_from_desc = author_re.captures(&t).and_then(|c| c.get(1)).map(|m| clean_extracted(m.as_str()));
+                let narrator_from_desc = narrator_re.captures(&t).and_then(|c| c.get(1)).map(|m| clean_extracted(m.as_str()));
                 
                 // Get original artist value
                 let artist_val = meta_obj.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
