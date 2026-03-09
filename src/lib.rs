@@ -86,29 +86,60 @@ fn get_ffmpeg_path() -> String {
         return path.clone();
     }
     
+    let mut search_paths = Vec::new();
+
     // 1. Check relative to Executable (Production usually)
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(root) = current_exe.parent() {
-            // Plugins structure:
-            // plugins/
-            //   FFmpeg Provider@1.0.0/
-            //     ffmpeg.exe
-            //     ffprobe.exe
-            
-            let plugin_dir = root.join("plugins").join("FFmpeg Provider@1.0.0");
-            let mut bin_path = plugin_dir.join("ffmpeg");
-            if !std::env::consts::EXE_EXTENSION.is_empty() { 
-                bin_path.set_extension(std::env::consts::EXE_EXTENSION); 
+            search_paths.push(root.to_path_buf());
+        }
+    }
+
+    // 2. Check relative to CWD (Development usually)
+    if let Ok(cwd) = std::env::current_dir() {
+        search_paths.push(cwd);
+    }
+
+    let exe_ext = std::env::consts::EXE_EXTENSION;
+
+    for root in search_paths {
+        // Try to find "plugins" directory
+        let possible_plugin_dirs = vec![
+            root.join("plugins"),
+            root.join("backend").join("plugins"),
+            root.join("ting-reader").join("backend").join("plugins"),
+            // Case: running from target/debug/deps, so plugins is up 3 levels then plugins
+            root.join("..").join("..").join("plugins"), 
+        ];
+
+        for plugins_dir in possible_plugin_dirs {
+            if plugins_dir.exists() {
+                // Look for any folder starting with "FFmpeg Provider" or "ffmpeg-utils"
+                if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                            if dir_name.starts_with("FFmpeg Provider") || dir_name.starts_with("ffmpeg-utils") {
+                                // Found candidate directory, check for binary
+                                let mut bin_path = path.join("ffmpeg");
+                                if !exe_ext.is_empty() { bin_path.set_extension(exe_ext); }
+                                if bin_path.exists() { return bin_path.to_string_lossy().to_string(); }
+
+                                let mut bin_sub_path = path.join("bin").join("ffmpeg");
+                                if !exe_ext.is_empty() { bin_sub_path.set_extension(exe_ext); }
+                                if bin_sub_path.exists() { return bin_sub_path.to_string_lossy().to_string(); }
+                            }
+                        }
+                    }
+                }
             }
-            if bin_path.exists() { return bin_path.to_string_lossy().to_string(); }
         }
     }
     
     // Check ./ffmpeg.exe (CWD root fallback)
     let mut local_path = PathBuf::from("ffmpeg");
-    if !std::env::consts::EXE_EXTENSION.is_empty() { 
-        local_path.set_extension(std::env::consts::EXE_EXTENSION); 
-    }
+    if !exe_ext.is_empty() { local_path.set_extension(exe_ext); }
     if local_path.exists() {
         return local_path.to_string_lossy().to_string();
     }
@@ -118,23 +149,57 @@ fn get_ffmpeg_path() -> String {
 }
 
 fn get_ffprobe_path() -> String {
+    let mut search_paths = Vec::new();
+
     // 1. Check relative to Executable
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(root) = current_exe.parent() {
-            let plugin_dir = root.join("plugins").join("FFmpeg Provider@1.0.0");
-            let mut bin_path = plugin_dir.join("ffprobe");
-            if !std::env::consts::EXE_EXTENSION.is_empty() { 
-                bin_path.set_extension(std::env::consts::EXE_EXTENSION); 
+            search_paths.push(root.to_path_buf());
+        }
+    }
+
+    // 2. Check relative to CWD
+    if let Ok(cwd) = std::env::current_dir() {
+        search_paths.push(cwd);
+    }
+
+    let exe_ext = std::env::consts::EXE_EXTENSION;
+
+    for root in search_paths {
+        // Try to find "plugins" directory
+        let possible_plugin_dirs = vec![
+            root.join("plugins"),
+            root.join("backend").join("plugins"),
+            root.join("ting-reader").join("backend").join("plugins"),
+            root.join("..").join("..").join("plugins"), 
+        ];
+
+        for plugins_dir in possible_plugin_dirs {
+            if plugins_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                            if dir_name.starts_with("FFmpeg Provider") || dir_name.starts_with("ffmpeg-utils") {
+                                let mut bin_path = path.join("ffprobe");
+                                if !exe_ext.is_empty() { bin_path.set_extension(exe_ext); }
+                                if bin_path.exists() { return bin_path.to_string_lossy().to_string(); }
+
+                                let mut bin_sub_path = path.join("bin").join("ffprobe");
+                                if !exe_ext.is_empty() { bin_sub_path.set_extension(exe_ext); }
+                                if bin_sub_path.exists() { return bin_sub_path.to_string_lossy().to_string(); }
+                            }
+                        }
+                    }
+                }
             }
-            if bin_path.exists() { return bin_path.to_string_lossy().to_string(); }
         }
     }
     
     // Check ./ffprobe.exe (CWD root)
     let mut local_path = PathBuf::from("ffprobe");
-    if !std::env::consts::EXE_EXTENSION.is_empty() { 
-        local_path.set_extension(std::env::consts::EXE_EXTENSION); 
-    }
+    if !exe_ext.is_empty() { local_path.set_extension(exe_ext); }
     if local_path.exists() {
         return local_path.to_string_lossy().to_string();
     }
@@ -174,17 +239,7 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
     
     // Run ffprobe
     // ffprobe -v quiet -print_format json -show_format -show_streams "path"
-    let mut command = Command::new(&ffprobe);
-    
-    // Add CREATE_NO_WINDOW flag on Windows to avoid flashing console windows
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    
-    let output = command
+    let output = Command::new(&ffprobe)
         .arg("-v")
         .arg("quiet")
         .arg("-print_format")
@@ -193,7 +248,7 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
         .arg("-show_streams") // Enable stream info to detect cover art
         .arg(path_str)
         .output()
-        .map_err(|e| format!("Failed to execute ffprobe at '{}': {}", ffprobe, e))?;
+        .map_err(|e| format!("Failed to execute ffprobe: {}", e))?;
         
     if !output.status.success() {
         return Err(format!("ffprobe exited with error: {}", String::from_utf8_lossy(&output.stderr)));
@@ -423,16 +478,7 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
             // Only extract if not exists (to avoid overwriting user custom cover)
             if !cover_path.exists() {
                 // Strategy 1: Copy with explicit format
-                let mut command = Command::new(&ffmpeg);
-                
-                #[cfg(target_os = "windows")]
-                {
-                    use std::os::windows::process::CommandExt;
-                    const CREATE_NO_WINDOW: u32 = 0x08000000;
-                    command.creation_flags(CREATE_NO_WINDOW);
-                }
-
-                let status = command
+                let status = Command::new(&ffmpeg)
                     .arg("-loglevel")
                     .arg("error")
                     .arg("-y")
@@ -454,15 +500,7 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
 
                 if !success {
                     // Strategy 2: Transcode (remove -c copy)
-                    let mut command2 = Command::new(&ffmpeg);
-                    #[cfg(target_os = "windows")]
-                    {
-                        use std::os::windows::process::CommandExt;
-                        const CREATE_NO_WINDOW: u32 = 0x08000000;
-                        command2.creation_flags(CREATE_NO_WINDOW);
-                    }
-                    
-                    let status2 = command2
+                    let status2 = Command::new(&ffmpeg)
                         .arg("-loglevel")
                         .arg("error")
                         .arg("-y")
@@ -489,14 +527,7 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                  // Sometimes codec detection is wrong
                  let cover_path_jpg = parent.join("cover.jpg");
                  if !cover_path_jpg.exists() {
-                     let mut command3 = Command::new(&ffmpeg);
-                     #[cfg(target_os = "windows")]
-                     {
-                        use std::os::windows::process::CommandExt;
-                        const CREATE_NO_WINDOW: u32 = 0x08000000;
-                        command3.creation_flags(CREATE_NO_WINDOW);
-                     }
-                     let _ = command3
+                     let _ = Command::new(&ffmpeg)
                         .arg("-loglevel")
                         .arg("error")
                         .arg("-y")
