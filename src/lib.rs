@@ -44,6 +44,7 @@ pub unsafe extern "C" fn plugin_invoke(
         "configure" => configure(params_json),
         "get_decryption_plan" => get_decryption_plan(params_json),
         "get_metadata_read_size" => get_metadata_read_size(params_json),
+        "garbage_collect" => Ok(json!({})),
         _ => Err(format!("Unknown method: {}", method_str)),
     };
 
@@ -260,6 +261,9 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
     let empty_tags = json!({});
     let tags = format.get("tags").unwrap_or(&empty_tags);
     
+    // Debug logging for tags
+    eprintln!("Extracted tags for {}: {:?}", path_str, tags);
+
     let duration_sec = format.get("duration")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
@@ -303,7 +307,7 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                     }
                 },
                 "genre" | "gen" => { meta_obj.insert("genre".to_string(), json!(v_str)); },
-                "description" | "desc" | "synopsis" => { meta_obj.insert("description".to_string(), json!(v_str)); },
+                "description" | "desc" | "synopsis" | "long_description" => { meta_obj.insert("description".to_string(), json!(v_str)); },
                 _ => {} // Ignore others
             }
         }
