@@ -174,7 +174,17 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
     
     // Run ffprobe
     // ffprobe -v quiet -print_format json -show_format -show_streams "path"
-    let output = Command::new(&ffprobe)
+    let mut command = Command::new(&ffprobe);
+    
+    // Add CREATE_NO_WINDOW flag on Windows to avoid flashing console windows
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    
+    let output = command
         .arg("-v")
         .arg("quiet")
         .arg("-print_format")
@@ -183,7 +193,7 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
         .arg("-show_streams") // Enable stream info to detect cover art
         .arg(path_str)
         .output()
-        .map_err(|e| format!("Failed to execute ffprobe: {}", e))?;
+        .map_err(|e| format!("Failed to execute ffprobe at '{}': {}", ffprobe, e))?;
         
     if !output.status.success() {
         return Err(format!("ffprobe exited with error: {}", String::from_utf8_lossy(&output.stderr)));
@@ -413,7 +423,16 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
             // Only extract if not exists (to avoid overwriting user custom cover)
             if !cover_path.exists() {
                 // Strategy 1: Copy with explicit format
-                let status = Command::new(&ffmpeg)
+                let mut command = Command::new(&ffmpeg);
+                
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    const CREATE_NO_WINDOW: u32 = 0x08000000;
+                    command.creation_flags(CREATE_NO_WINDOW);
+                }
+
+                let status = command
                     .arg("-loglevel")
                     .arg("error")
                     .arg("-y")
@@ -435,7 +454,15 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
 
                 if !success {
                     // Strategy 2: Transcode (remove -c copy)
-                    let status2 = Command::new(&ffmpeg)
+                    let mut command2 = Command::new(&ffmpeg);
+                    #[cfg(target_os = "windows")]
+                    {
+                        use std::os::windows::process::CommandExt;
+                        const CREATE_NO_WINDOW: u32 = 0x08000000;
+                        command2.creation_flags(CREATE_NO_WINDOW);
+                    }
+                    
+                    let status2 = command2
                         .arg("-loglevel")
                         .arg("error")
                         .arg("-y")
@@ -462,7 +489,14 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
                  // Sometimes codec detection is wrong
                  let cover_path_jpg = parent.join("cover.jpg");
                  if !cover_path_jpg.exists() {
-                     let _ = Command::new(&ffmpeg)
+                     let mut command3 = Command::new(&ffmpeg);
+                     #[cfg(target_os = "windows")]
+                     {
+                        use std::os::windows::process::CommandExt;
+                        const CREATE_NO_WINDOW: u32 = 0x08000000;
+                        command3.creation_flags(CREATE_NO_WINDOW);
+                     }
+                     let _ = command3
                         .arg("-loglevel")
                         .arg("error")
                         .arg("-y")
